@@ -1,0 +1,160 @@
+
+
+from time import perf_counter as time
+from math import ceil, floor
+from itertools import product
+import numpy as np
+from numpy import newaxis
+
+heurmaximumrunningtime = 60
+class CRoundingHeur:
+    def __init__(self,dt,_x):
+        self.startingtime = time()
+        self.data = dt
+        self.x = np.zeros(dt.nj).astype(int)
+        self.z = np.zeros(dt.ni).astype(float)
+
+        st = time()
+        ub0 = self.rounding(_x)
+        et = time()
+        print(f'rounding time: {et-st:18.2f}')
+
+        print("heuristic")
+        print(f"initial solution : {ub0:18.2f}")
+        self.ub = self.vnd()
+        total_time = time() - self.startingtime
+        print(f"final   solution : {self.ub:18.2f}")
+        print(f'heuristic time   : {total_time:18.2f} s ')
+
+    def rounding(self,_x):
+        ix = np.argsort(_x)[::-1]
+        obj = float('inf')
+
+        for j in ix:
+            self.x[j] = 1
+            inf = self.get_obj()
+            self.x[j] = 0
+            if obj > inf:
+               self.x[j] = 1
+               obj = inf
+            else:
+               break
+        self.ub = obj
+        return obj
+ 
+    def n0_close_facilities(self,obj):
+        J1 = np.argwhere(self.x>0.9)[:,0]
+        for j in J1:
+            self.x[j] = 0
+            newobj = self.get_obj()
+            if newobj < obj:
+              obj = newobj
+            else:
+              self.x[j] = 1
+
+            if self.stop_heur() == True:
+               return obj
+        return obj
+
+    def n1_open_facilities(self,obj):
+        J0 = np.argwhere(self.x<0.1)[:,0]
+        for j in J0:
+            self.x[j] = 1
+            newobj = self.get_obj()
+            if newobj < obj:
+               obj = newobj
+            else:
+               self.x[j] = 0
+
+            if self.stop_heur() == True:
+               return obj
+        return obj
+
+    def n2_swap(self,obj):
+        dt = self.data
+        nhalf = ceil(dt.nj/4)
+        neighbor = dt.neighbor
+        stop = False
+        while stop == False:
+           stop = True
+           J1 = np.argwhere(self.x > 0.9)[:,0]
+           for j1 in J1: 
+               J0 = neighbor[j1][:nhalf]
+               for j0 in J0:
+                   if self.x[j0] < 0.1: 
+                      self.x[j0],self.x[j1] = 1,0
+                      newobj = self.get_obj()
+                      if newobj < obj:
+                         obj = newobj
+                         stop = False
+                         break
+                      else:
+                         self.x[j0],self.x[j1] = 0,1
+               if stop == False:
+                   break
+
+               if self.stop_heur() == True:
+                  return obj
+        return obj
+
+    def stop_heur(self):
+        if time() - self.startingtime > heurmaximumrunningtime:
+           return True
+        else:
+           return False
+
+    def check_time(self,h):
+        if time() - self.startingtime > heurmaximumrunningtime:
+           return 4
+        else:
+           return h
+
+    def vnd(self):
+        bestx = np.copy(self.x)
+        bestobj = self.ub 
+        obj = self.ub
+        h = 0
+        times = [0.0] * 3
+        while (h < 3):
+            st = time()
+            if h == 0:
+               obj = self.n0_close_facilities(obj)
+               h = self.check_time(h)
+            elif h == 1:
+               obj = self.n1_open_facilities(obj)
+               h = self.check_time(h)
+            elif h == 2:
+               obj = self.n2_swap(obj)
+               h = self.check_time(h)
+            et = time()
+            if h >= 3:
+               break 
+            else: 
+               times[h] += (et - st)
+            if obj < bestobj:
+               np.copyto(bestx,self.x)
+               bestobj = obj
+               h = 0
+            else:
+               h += 1
+
+        self.ub = self.get_obj()
+        #print(times)
+        return bestobj
+
+    def get_obj(self):
+        dt = self.data
+        I,J = range(dt.ni),range(dt.nj)
+        totalcost = (self.x*dt.f).sum()
+        for i in I:
+            gamma = dt.gamma[i]
+            den = 1.0
+            for j in dt.sorted_idpi[i]:
+                if self.x[j] == 1:
+                   gamma -= 1
+                   den += dt.pi[i][j]
+                   if gamma == 0:
+                      break
+            totalcost += dt.b[i] / den
+            self.z[i] = den - 1.0
+        return totalcost
